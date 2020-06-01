@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<android.support.constraint.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".EnrollActivity">
+
+
+    <EditText
+        android:id="@+id/phoneNumberEditText"
+        android:layout_width="312dp"
+        android:layout_height="61dp"
+        android:layout_marginTop="316dp"
+        android:ems="10"
+        android:inputType="textPersonName"
+        android:hint="Phone number"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.494"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <Button
+        android:id="@+id/btnEnroll"
+        android:layout_width="271dp"
+        android:layout_height="57dp"
+        android:text="Enroll"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/phoneNumberEditText"
+        app:layout_constraintVertical_bias="0.117" />
+</android.support.constraint.ConstraintLayout>
