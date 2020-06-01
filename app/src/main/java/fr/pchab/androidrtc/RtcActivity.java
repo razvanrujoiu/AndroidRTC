@@ -3,19 +3,36 @@ package fr.pchab.androidrtc;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Point;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
+import android.util.Log;
+import android.view.View;
 import android.view.Window;
+import android.view.WindowManager;
 import android.view.WindowManager.LayoutParams;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.Toast;
 
+import org.eclipse.paho.android.service.MqttAndroidClient;
+import org.eclipse.paho.client.mqttv3.IMqttActionListener;
+import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
+import org.eclipse.paho.client.mqttv3.IMqttToken;
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.eclipse.paho.client.mqttv3.MqttPersistenceException;
 import org.json.JSONException;
 import org.webrtc.MediaStream;
 import org.webrtc.VideoRenderer;
 import org.webrtc.VideoRendererGui;
 
+import java.io.UnsupportedEncodingException;
 import java.util.List;
 
 import fr.pchab.webrtcclient.PeerConnectionParameters;
@@ -41,7 +58,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     private static final int REMOTE_WIDTH = 100;
     private static final int REMOTE_HEIGHT = 100;
     private VideoRendererGui.ScalingType scalingType = VideoRendererGui.ScalingType.SCALE_ASPECT_FILL;
-    private GLSurfaceView vsv;
+    private GLSurfaceView glSurfaceView;
     private VideoRenderer.Callbacks localRender;
     private VideoRenderer.Callbacks remoteRender;
     private WebRtcClient client;
@@ -51,9 +68,21 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     private static final String[] RequiredPermissions = new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO};
     protected PermissionChecker permissionChecker = new PermissionChecker();
 
+
+    MqttAndroidClient mqttAndroidClient;
+    final String mqttServerUri = "tcp://test.mosquitto.org:1883";
+    SharedPreferences sharedPreferences;
+    String phoneNumber = "";
+    String remotePhoneNumber = "";
+
+    private EditText remotePhoneNumberEditText;
+    private Button callBtn;
+    private Button answerBtn;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(
                 LayoutParams.FLAG_FULLSCREEN
@@ -65,10 +94,10 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         mSocketAddress = "http://" + getResources().getString(R.string.host);
         mSocketAddress += (":" + getResources().getString(R.string.port) + "/");
 
-        vsv = (GLSurfaceView) findViewById(R.id.glview_call);
-        vsv.setPreserveEGLContextOnPause(true);
-        vsv.setKeepScreenOn(true);
-        VideoRendererGui.setView(vsv, new Runnable() {
+        glSurfaceView = findViewById(R.id.glview_call);
+        glSurfaceView.setPreserveEGLContextOnPause(true);
+        glSurfaceView.setKeepScreenOn(true);
+        VideoRendererGui.setView(glSurfaceView, new Runnable() {
             @Override
             public void run() {
                 init();
@@ -90,7 +119,115 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
             final List<String> segments = intent.getData().getPathSegments();
             callerId = segments.get(0);
         }
+
+        sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+        phoneNumber = sharedPreferences.getString("phoneNumber", null);
+
+        remotePhoneNumberEditText = findViewById(R.id.remotePhoneNumberEditText);
+        callBtn = findViewById(R.id.callBtn);
+        answerBtn = findViewById(R.id.answerBtn);
+
+        setupMqttConnection();
         checkPermissions();
+
+        callBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                remotePhoneNumber = remotePhoneNumberEditText.getText().toString();
+                if (remotePhoneNumber.equals("") || remotePhoneNumber.isEmpty()) {
+                    Toast.makeText(getApplicationContext(), "Please fill phone number field", Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                String message = "test publish from android";
+                publishMessage(message, remotePhoneNumber);
+
+            }
+        });
+        
+    }
+
+
+    void setupMqttConnection() {
+        mqttAndroidClient = new MqttAndroidClient(getApplicationContext(), mqttServerUri, phoneNumber);
+
+        try {
+            MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
+            mqttConnectOptions.setAutomaticReconnect(true);
+            mqttConnectOptions.setCleanSession(false);
+
+            IMqttToken iMqttToken = mqttAndroidClient.connect(mqttConnectOptions);
+            iMqttToken.setActionCallback(new IMqttActionListener() {
+                @Override
+                public void onSuccess(IMqttToken asyncActionToken) {
+                    Log.d("MQTT", "mqtt connection complete");
+                }
+
+                @Override
+                public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                    Log.d("MQTT", "mqtt connection failed");
+                }
+            });
+        } catch (MqttException e) {
+            e.printStackTrace();
+        }
+
+        mqttAndroidClient.setCallback(new MqttCallbackExtended() {
+            @Override
+            public void connectComplete(boolean reconnect, String serverURI) {
+                subscribeToTopic(phoneNumber);
+            }
+
+            @Override
+            public void connectionLost(Throwable cause) {
+                Log.d("MQTT", "mqtt connection lost");
+            }
+
+            @Override
+            public void messageArrived(String topic, MqttMessage message) throws Exception {
+                if(topic.equals(phoneNumber)) {
+                    byte[] payload = message.getPayload();
+                    String msg = new String(payload, "UTF-8");
+                    String log = "mqtt message: " + msg + " from: " + topic;
+                    Log.d("MQTT", log);
+                }
+
+            }
+
+            @Override
+            public void deliveryComplete(IMqttDeliveryToken token) {
+                Log.d("MQTT", "mqtt delivery complete");
+            }
+        });
+
+
+    }
+
+    public void subscribeToTopic(String topicName) {
+        try {
+          mqttAndroidClient.subscribe(topicName, 0, null, new IMqttActionListener() {
+              @Override
+              public void onSuccess(IMqttToken asyncActionToken) {
+                  Log.d("MQTT", "subscribed sucessfully");
+              }
+
+              @Override
+              public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                  Log.d("MQTT", "failed to subscribe");
+              }
+          });
+        } catch (MqttException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void publishMessage(String message, String topic) {
+        try {
+            MqttMessage mqttMessage = new MqttMessage(message.getBytes());
+            mqttAndroidClient.publish(topic, mqttMessage);
+        } catch (MqttException e) {
+            e.printStackTrace();
+        }
     }
 
     private void checkPermissions() {
@@ -120,7 +257,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     @Override
     public void onPause() {
         super.onPause();
-        vsv.onPause();
+        glSurfaceView.onPause();
         if (client != null) {
             client.onPause();
         }
@@ -129,7 +266,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     @Override
     public void onResume() {
         super.onResume();
-        vsv.onResume();
+        glSurfaceView.onResume();
         if (client != null) {
             client.onResume();
         }
