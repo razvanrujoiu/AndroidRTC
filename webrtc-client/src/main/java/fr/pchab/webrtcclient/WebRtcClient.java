@@ -4,7 +4,6 @@ import android.opengl.EGLContext;
 import android.util.Log;
 
 import com.github.nkzawa.emitter.Emitter;
-import com.github.nkzawa.socketio.client.IO;
 import com.github.nkzawa.socketio.client.Socket;
 
 import org.json.JSONException;
@@ -22,7 +21,6 @@ import org.webrtc.VideoCapturer;
 import org.webrtc.VideoCapturerAndroid;
 import org.webrtc.VideoSource;
 
-import java.net.URISyntaxException;
 import java.util.HashMap;
 import java.util.LinkedList;
 
@@ -43,6 +41,9 @@ public class WebRtcClient {
     /**
      * Implement this interface to be notified of events.
      */
+
+
+
     public interface RtcListener {
         void onCallReady(String callId);
 
@@ -55,11 +56,16 @@ public class WebRtcClient {
         void onRemoveRemoteStream(int endPoint);
     }
 
+
+//    public Peer createOffer() {
+//
+//    }
+
     private interface Command {
         void execute(String peerId, JSONObject payload) throws JSONException;
     }
 
-    private class CreateOfferCommand implements Command {
+    public class CreateOfferCommand implements Command {
         public void execute(String peerId, JSONObject payload) throws JSONException {
             Log.d(TAG, "CreateOfferCommand");
             Peer peer = peers.get(peerId);
@@ -98,7 +104,7 @@ public class WebRtcClient {
             PeerConnection pc = peers.get(peerId).pc;
             if (pc.getRemoteDescription() != null) {
                 IceCandidate candidate = new IceCandidate(
-                        payload.getString("id"),
+                        payload.getString("phoneNumber"),
                         payload.getInt("label"),
                         payload.getString("candidate")
                 );
@@ -110,7 +116,7 @@ public class WebRtcClient {
     /**
      * Send a message through the signaling server
      *
-     * @param to      id of recipient
+     * @param to      phoneNumber of recipient
      * @param type    type of message
      * @param payload payload of message
      * @throws JSONException
@@ -120,7 +126,25 @@ public class WebRtcClient {
         message.put("to", to);
         message.put("type", type);
         message.put("payload", payload);
-        client.emit("message", message);
+//        client.emit("message", message);
+    }
+
+    public JSONObject getSdpOffer() {
+        String srcPhoneNumber = "0751481600";
+        Peer peer = new Peer(srcPhoneNumber);
+        peer.pc.createOffer(peer, pcConstraints);
+        JSONObject json = new JSONObject();
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("sdp", peer.pc.getLocalDescription().description);
+            payload.put("type", peer.pc.getLocalDescription().type.canonicalForm());
+            payload.put("srcPhoneNumber", srcPhoneNumber);
+            json.put("payload", payload);
+            json.put("type","SessionDescription");
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+        return  json;
     }
 
     private class MessageHandler {
@@ -174,7 +198,7 @@ public class WebRtcClient {
 
     private class Peer implements SdpObserver, PeerConnection.Observer {
         private PeerConnection pc;
-        private String id;
+        private String phoneNumber;
         private int endPoint;
 
         @Override
@@ -184,11 +208,15 @@ public class WebRtcClient {
                 JSONObject payload = new JSONObject();
                 payload.put("type", sdp.type.canonicalForm());
                 payload.put("sdp", sdp.description);
-                sendMessage(id, sdp.type.canonicalForm(), payload);
+                sendMessage(phoneNumber, sdp.type.canonicalForm(), payload);
                 pc.setLocalDescription(Peer.this, sdp);
             } catch (JSONException e) {
                 e.printStackTrace();
             }
+        }
+
+        public SessionDescription createOffer() {
+            return this.pc.getLocalDescription();
         }
 
         @Override
@@ -210,7 +238,7 @@ public class WebRtcClient {
         @Override
         public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
             if (iceConnectionState == PeerConnection.IceConnectionState.DISCONNECTED) {
-                removePeer(id);
+                removePeer(phoneNumber);
                 mListener.onStatusChanged("DISCONNECTED");
             }
         }
@@ -219,14 +247,15 @@ public class WebRtcClient {
         public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {
         }
 
+
         @Override
         public void onIceCandidate(final IceCandidate candidate) {
             try {
                 JSONObject payload = new JSONObject();
                 payload.put("label", candidate.sdpMLineIndex);
-                payload.put("id", candidate.sdpMid);
+                payload.put("phoneNumber", candidate.sdpMid);
                 payload.put("candidate", candidate.sdp);
-                sendMessage(id, "candidate", payload);
+                sendMessage(phoneNumber, "candidate", payload);
             } catch (JSONException e) {
                 e.printStackTrace();
             }
@@ -242,7 +271,7 @@ public class WebRtcClient {
         @Override
         public void onRemoveStream(MediaStream mediaStream) {
             Log.d(TAG, "onRemoveStream " + mediaStream.label());
-            removePeer(id);
+            removePeer(phoneNumber);
         }
 
         @Override
@@ -254,14 +283,22 @@ public class WebRtcClient {
 
         }
 
-        public Peer(String id, int endPoint) {
-            Log.d(TAG, "new Peer: " + id + " " + endPoint);
+        public Peer(String phoneNumber, int endPoint) {
+            Log.d(TAG, "new Peer: " + phoneNumber + " " + endPoint);
             this.pc = factory.createPeerConnection(iceServers, pcConstraints, this);
-            this.id = id;
+            this.phoneNumber = phoneNumber;
             this.endPoint = endPoint;
 
             pc.addStream(localMS); //, new MediaConstraints()
 
+            mListener.onStatusChanged("CONNECTING");
+        }
+
+        public Peer(String srcPhoneNumber) {
+            this.pc = factory.createPeerConnection(iceServers, pcConstraints, this);
+            this.phoneNumber = srcPhoneNumber;
+
+//            pc.addStream(localMS);
             mListener.onStatusChanged("CONNECTING");
         }
     }
@@ -274,38 +311,44 @@ public class WebRtcClient {
         return peer;
     }
 
+
+
     private void removePeer(String id) {
         Peer peer = peers.get(id);
         mListener.onRemoveRemoteStream(peer.endPoint);
         peer.pc.close();
-        peers.remove(peer.id);
+        peers.remove(peer.phoneNumber);
         endPoints[peer.endPoint] = false;
     }
 
-    public WebRtcClient(RtcListener listener, String host, PeerConnectionParameters params, EGLContext mEGLcontext) {
+    public WebRtcClient(RtcListener listener, PeerConnectionParameters params, EGLContext mEGLcontext) {
         mListener = listener;
         pcParams = params;
         PeerConnectionFactory.initializeAndroidGlobals(listener, true, true,
                 params.videoCodecHwAcceleration, mEGLcontext);
         factory = new PeerConnectionFactory();
-        MessageHandler messageHandler = new MessageHandler();
+//        MessageHandler messageHandler = new MessageHandler();
 
-        try {
-            client = IO.socket(host);
-        } catch (URISyntaxException e) {
-            e.printStackTrace();
-        }
-        client.on("id", messageHandler.onId);
-        client.on("message", messageHandler.onMessage);
-        client.connect();
+//        try {
+//            client = IO.socket(host);
+//        } catch (URISyntaxException e) {
+//            e.printStackTrace();
+//        }
+//        client.on("phoneNumber", messageHandler.onId);
+//        client.on("message", messageHandler.onMessage);
+//        client.connect();
 
         iceServers.add(new PeerConnection.IceServer("stun:23.21.150.121"));
         iceServers.add(new PeerConnection.IceServer("stun:stun.l.google.com:19302"));
+        iceServers.add(new PeerConnection.IceServer("turn:numb.viagenie.ca","webrtc@live.com", "muazkh"));
+
 
         pcConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
         pcConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"));
         pcConstraints.optional.add(new MediaConstraints.KeyValuePair("DtlsSrtpKeyAgreement", "true"));
     }
+
+
 
     /**
      * Call this method in Activity.onPause()
@@ -360,7 +403,7 @@ public class WebRtcClient {
         }
     }
 
-    private void setCamera() {
+    public void setCamera() {
         localMS = factory.createLocalMediaStream("ARDAMS");
         if (pcParams.videoCallEnabled) {
             MediaConstraints videoConstraints = new MediaConstraints();

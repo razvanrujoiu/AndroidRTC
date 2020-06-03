@@ -9,10 +9,10 @@ import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
+import android.util.JsonReader;
 import android.util.Log;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowManager;
 import android.view.WindowManager.LayoutParams;
 import android.widget.Button;
 import android.widget.EditText;
@@ -26,13 +26,14 @@ import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
-import org.eclipse.paho.client.mqttv3.MqttPersistenceException;
 import org.json.JSONException;
+import org.json.JSONObject;
+import org.webrtc.IceCandidate;
 import org.webrtc.MediaStream;
+import org.webrtc.SessionDescription;
 import org.webrtc.VideoRenderer;
 import org.webrtc.VideoRendererGui;
 
-import java.io.UnsupportedEncodingException;
 import java.util.List;
 
 import fr.pchab.webrtcclient.PeerConnectionParameters;
@@ -61,7 +62,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     private GLSurfaceView glSurfaceView;
     private VideoRenderer.Callbacks localRender;
     private VideoRenderer.Callbacks remoteRender;
-    private WebRtcClient client;
+    private WebRtcClient webRtcClient;
     private String mSocketAddress;
     private String callerId;
 
@@ -139,12 +140,15 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
                     return;
                 }
 
-                String message = "test publish from android";
-                publishMessage(message, remotePhoneNumber);
+                JSONObject json = webRtcClient.getSdpOffer();
+
+                publishMessage(json.toString(), "/" + remotePhoneNumber);
+
+                webRtcClient.setCamera();
 
             }
         });
-        
+
     }
 
 
@@ -175,7 +179,8 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         mqttAndroidClient.setCallback(new MqttCallbackExtended() {
             @Override
             public void connectComplete(boolean reconnect, String serverURI) {
-                subscribeToTopic(phoneNumber);
+
+                subscribeToTopic("/" + phoneNumber);
             }
 
             @Override
@@ -185,13 +190,39 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
             @Override
             public void messageArrived(String topic, MqttMessage message) throws Exception {
-                if(topic.equals(phoneNumber)) {
-                    byte[] payload = message.getPayload();
-                    String msg = new String(payload, "UTF-8");
-                    String log = "mqtt message: " + msg + " from: " + topic;
-                    Log.d("MQTT", log);
-                }
+                if(topic.equals("/" + phoneNumber)) {
+                    byte[] mqttPayload = message.getPayload();
+                    String jsonString = new String(mqttPayload, "UTF-8");
+                    Log.d("MQTT", jsonString);
 
+                    JSONObject jsonObject = new JSONObject(jsonString);
+                    JSONObject payload = jsonObject.getJSONObject("payload");
+                    String messageType = jsonObject.getString("type");
+
+                    if (messageType.equals("SessionDescription")) {
+
+                        String sdpDescription = payload.getString("sdp");
+                        String type = payload.getString("type");
+                        String remotePhoneNumber = payload.getString("srcPhoneNumber");
+
+                        SessionDescription sessionDescription = new SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdpDescription);
+
+                        Log.d("MQTT", sessionDescription.toString());
+
+                    } else if (messageType.equals("IceCandidate")) {
+
+                        String sdp = payload.getString("sdp");
+                        int sdpMLineIndex = payload.getInt("sdpMLineIndex");
+                        String sdpMid = payload.getString("sdpMid");
+                        String remotePhoneNumber = payload.getString("srcPhoneNumber");
+
+                        IceCandidate iceCandidate = new IceCandidate(sdpMid, sdpMLineIndex, sdp);
+
+                        Log.d("MQTT", iceCandidate.toString());
+
+                    }
+
+                }
             }
 
             @Override
@@ -203,12 +234,12 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
     }
 
-    public void subscribeToTopic(String topicName) {
+    public void subscribeToTopic(final String topicName) {
         try {
           mqttAndroidClient.subscribe(topicName, 0, null, new IMqttActionListener() {
               @Override
               public void onSuccess(IMqttToken asyncActionToken) {
-                  Log.d("MQTT", "subscribed sucessfully");
+                  Log.d("MQTT", "subscribed sucessfully to: " + topicName);
               }
 
               @Override
@@ -251,15 +282,15 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         PeerConnectionParameters params = new PeerConnectionParameters(
                 true, false, displaySize.x, displaySize.y, 30, 1, VIDEO_CODEC_VP9, true, 1, AUDIO_CODEC_OPUS, true);
 
-        client = new WebRtcClient(this, mSocketAddress, params, VideoRendererGui.getEGLContext());
+        webRtcClient = new WebRtcClient(this, params, VideoRendererGui.getEGLContext());
     }
 
     @Override
     public void onPause() {
         super.onPause();
         glSurfaceView.onPause();
-        if (client != null) {
-            client.onPause();
+        if (webRtcClient != null) {
+            webRtcClient.onPause();
         }
     }
 
@@ -267,15 +298,15 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     public void onResume() {
         super.onResume();
         glSurfaceView.onResume();
-        if (client != null) {
-            client.onResume();
+        if (webRtcClient != null) {
+            webRtcClient.onResume();
         }
     }
 
     @Override
     public void onDestroy() {
-        if (client != null) {
-            client.onDestroy();
+        if (webRtcClient != null) {
+            webRtcClient.onDestroy();
         }
         super.onDestroy();
     }
@@ -294,7 +325,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     }
 
     public void answer(String callerId) throws JSONException {
-        client.sendMessage(callerId, "init", null);
+        webRtcClient.sendMessage(callerId, "init", null);
         startCam();
     }
 
@@ -302,20 +333,13 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         Intent msg = new Intent(Intent.ACTION_SEND);
         msg.putExtra(Intent.EXTRA_TEXT, mSocketAddress + callId);
         msg.setType("text/plain");
-        startActivityForResult(Intent.createChooser(msg, "Call someone :"), VIDEO_CALL_SENT);
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == VIDEO_CALL_SENT) {
-            startCam();
-        }
-    }
 
     public void startCam() {
         // Camera settings
         if (PermissionChecker.hasPermissions(this, RequiredPermissions)) {
-            client.start("android_test");
+            webRtcClient.start("android_test");
         }
     }
 
