@@ -2,6 +2,10 @@ package fr.pchab.androidrtc;
 
 import android.Manifest;
 import android.app.Activity;
+import android.arch.lifecycle.Lifecycle;
+import android.arch.lifecycle.LifecycleOwner;
+import android.arch.lifecycle.MutableLiveData;
+import android.arch.lifecycle.Observer;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Point;
@@ -9,6 +13,7 @@ import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.util.JsonReader;
 import android.util.Log;
 import android.view.View;
@@ -38,6 +43,9 @@ import java.util.List;
 
 import fr.pchab.webrtcclient.PeerConnectionParameters;
 import fr.pchab.webrtcclient.WebRtcClient;
+import io.reactivex.rxjava3.core.Observable;
+import io.reactivex.rxjava3.core.Scheduler;
+import io.reactivex.rxjava3.schedulers.Schedulers;
 
 public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     private final static int VIDEO_CALL_SENT = 666;
@@ -80,6 +88,8 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     private Button callBtn;
     private Button answerBtn;
 
+    Observable<IceCandidate> iceCandidateObservable;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -92,8 +102,8 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
                         | LayoutParams.FLAG_SHOW_WHEN_LOCKED
                         | LayoutParams.FLAG_TURN_SCREEN_ON);
         setContentView(R.layout.main);
-        mSocketAddress = "http://" + getResources().getString(R.string.host);
-        mSocketAddress += (":" + getResources().getString(R.string.port) + "/");
+//        mSocketAddress = "http://" + getResources().getString(R.string.host);
+//        mSocketAddress += (":" + getResources().getString(R.string.port) + "/");
 
         glSurfaceView = findViewById(R.id.glview_call);
         glSurfaceView.setPreserveEGLContextOnPause(true);
@@ -131,23 +141,32 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         setupMqttConnection();
         checkPermissions();
 
-        callBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                remotePhoneNumber = remotePhoneNumberEditText.getText().toString();
-                if (remotePhoneNumber.equals("") || remotePhoneNumber.isEmpty()) {
-                    Toast.makeText(getApplicationContext(), "Please fill phone number field", Toast.LENGTH_LONG).show();
-                    return;
-                }
+        callBtn.setOnClickListener(v -> {
+            remotePhoneNumber = remotePhoneNumberEditText.getText().toString();
+            if (remotePhoneNumber.equals("") || remotePhoneNumber.isEmpty()) {
+                Toast.makeText(getApplicationContext(), "Please fill phone number field", Toast.LENGTH_LONG).show();
+                return;
+            }
 
-                JSONObject json = webRtcClient.getSdpOffer();
+            JSONObject json = webRtcClient.getSdpOffer(phoneNumber);
 
+            publishMessage(json.toString(), "/" + remotePhoneNumber);
+
+            webRtcClient.setCamera();
+
+        });
+
+        answerBtn.setOnClickListener(v -> {
+
+            if(!remotePhoneNumber.isEmpty()) {
+                JSONObject json = webRtcClient.createSdpAnswer(phoneNumber);
                 publishMessage(json.toString(), "/" + remotePhoneNumber);
-
                 webRtcClient.setCamera();
-
             }
         });
+
+
+
 
     }
 
@@ -203,9 +222,11 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
                         String sdpDescription = payload.getString("sdp");
                         String type = payload.getString("type");
-                        String remotePhoneNumber = payload.getString("srcPhoneNumber");
+                        remotePhoneNumber = payload.getString("srcPhoneNumber");
 
                         SessionDescription sessionDescription = new SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdpDescription);
+
+                        webRtcClient.setRemoteSdp(remotePhoneNumber, sessionDescription);
 
                         Log.d("MQTT", sessionDescription.toString());
 
@@ -214,9 +235,11 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
                         String sdp = payload.getString("sdp");
                         int sdpMLineIndex = payload.getInt("sdpMLineIndex");
                         String sdpMid = payload.getString("sdpMid");
-                        String remotePhoneNumber = payload.getString("srcPhoneNumber");
+                        remotePhoneNumber = payload.getString("srcPhoneNumber");
 
                         IceCandidate iceCandidate = new IceCandidate(sdpMid, sdpMLineIndex, sdp);
+
+                        webRtcClient.addIceCandidate(remotePhoneNumber, iceCandidate);
 
                         Log.d("MQTT", iceCandidate.toString());
 
@@ -283,6 +306,29 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
                 true, false, displaySize.x, displaySize.y, 30, 1, VIDEO_CODEC_VP9, true, 1, AUDIO_CODEC_OPUS, true);
 
         webRtcClient = new WebRtcClient(this, params, VideoRendererGui.getEGLContext());
+
+        iceCandidateObservable = webRtcClient.iceCandidatePublishSubject.doOnNext(iceCandidate -> {
+            if (iceCandidate != null) {
+                JSONObject json = new JSONObject();
+                JSONObject payload = new JSONObject();
+
+                try {
+                    payload.put("sdp", iceCandidate.sdp);
+                    payload.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
+                    payload.put("sdpMid", iceCandidate.sdpMid);
+                    payload.put("srcPhoneNumber", phoneNumber);
+                    json.put("payload", payload);
+                    json.put("type", "IceCandidate");
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+
+                publishMessage(json.toString(), "/" + remotePhoneNumber);
+            }
+        });
+        iceCandidateObservable.subscribe();
+
+
     }
 
     @Override
@@ -311,23 +357,24 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         super.onDestroy();
     }
 
-    @Override
-    public void onCallReady(String callId) {
-        if (callerId != null) {
-            try {
-                answer(callerId);
-            } catch (JSONException e) {
-                e.printStackTrace();
-            }
-        } else {
-            call(callId);
-        }
-    }
+//    @Override
+//    public void onCallReady(String callId) {
+//
+////        if (callerId != null) {
+////            try {
+////                answer(callerId);
+////            } catch (JSONException e) {
+////                e.printStackTrace();
+////            }
+////        } else {
+////            call(callId);
+////        }
+//    }
 
-    public void answer(String callerId) throws JSONException {
-        webRtcClient.sendMessage(callerId, "init", null);
-        startCam();
-    }
+//    public void answer(String callerId) throws JSONException {
+//        webRtcClient.sendMessage(callerId, "init", null);
+//        startCam();
+//    }
 
     public void call(String callId) {
         Intent msg = new Intent(Intent.ACTION_SEND);
@@ -345,12 +392,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
     @Override
     public void onStatusChanged(final String newStatus) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Toast.makeText(getApplicationContext(), newStatus, Toast.LENGTH_SHORT).show();
-            }
-        });
+        runOnUiThread(() -> Toast.makeText(getApplicationContext(), newStatus, Toast.LENGTH_SHORT).show());
     }
 
     @Override
@@ -363,7 +405,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     }
 
     @Override
-    public void onAddRemoteStream(MediaStream remoteStream, int endPoint) {
+    public void onAddRemoteStream(MediaStream remoteStream) {
         remoteStream.videoTracks.get(0).addRenderer(new VideoRenderer(remoteRender));
         VideoRendererGui.update(remoteRender,
                 REMOTE_X, REMOTE_Y,
@@ -375,7 +417,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     }
 
     @Override
-    public void onRemoveRemoteStream(int endPoint) {
+    public void onRemoveRemoteStream() {
         VideoRendererGui.update(localRender,
                 LOCAL_X_CONNECTING, LOCAL_Y_CONNECTING,
                 LOCAL_WIDTH_CONNECTING, LOCAL_HEIGHT_CONNECTING,
@@ -387,4 +429,5 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         permissionChecker.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
+
 }
