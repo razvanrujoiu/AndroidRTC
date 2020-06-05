@@ -39,6 +39,7 @@ import org.webrtc.SessionDescription;
 import org.webrtc.VideoRenderer;
 import org.webrtc.VideoRendererGui;
 
+import java.io.UnsupportedEncodingException;
 import java.util.List;
 
 import fr.pchab.webrtcclient.PeerConnectionParameters;
@@ -207,7 +208,10 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
             public void messageArrived(String topic, MqttMessage message) throws Exception {
                 if(topic.equals("/" + phoneNumber)) {
                     byte[] mqttPayload = message.getPayload();
-                    String jsonString = new String(mqttPayload, "UTF-8");
+
+                    byte[] decryptedPayload = CryptoUtil.decryptAes128(mqttPayload, "/" + phoneNumber);
+
+                    String jsonString = new String(decryptedPayload, "UTF-8");
                     Log.d("MQTT", jsonString);
 
                     JSONObject jsonObject = new JSONObject(jsonString);
@@ -273,9 +277,12 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
     public void publishMessage(String message, String topic) {
         try {
-            MqttMessage mqttMessage = new MqttMessage(message.getBytes());
+            byte[] encryptedMessage = CryptoUtil.encryptAes128(message.getBytes("UTF-8"), topic);
+            MqttMessage mqttMessage = new MqttMessage(encryptedMessage);
             mqttAndroidClient.publish(topic, mqttMessage);
         } catch (MqttException e) {
+            e.printStackTrace();
+        } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
         }
     }
