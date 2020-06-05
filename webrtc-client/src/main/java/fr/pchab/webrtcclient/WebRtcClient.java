@@ -40,6 +40,10 @@ public class WebRtcClient {
     private MediaStream localMS;
     private VideoSource videoSource;
     private RtcListener mListener;
+    public DataChannel rtcDataChannel;
+    public Peer peer;
+    public SessionDescription remoteSdp;
+
 //    private Socket client;
 
     /**
@@ -49,8 +53,8 @@ public class WebRtcClient {
 
 
     public interface RtcListener {
-//        void onCallReady(String callId);
 
+//        void onCallReady(String callId);
 
         void onStatusChanged(String newStatus);
 
@@ -64,10 +68,6 @@ public class WebRtcClient {
 
     }
 
-
-//    public Peer createOffer() {
-//
-//    }
 
     private interface Command {
         void execute(String peerId, JSONObject payload) throws JSONException;
@@ -145,14 +145,14 @@ public class WebRtcClient {
 
 
     public JSONObject getSdpOffer(String srcPhoneNumber) {
-        Peer peer = new Peer(srcPhoneNumber);
+        peer = new Peer(srcPhoneNumber);
         peer.pc.createOffer(peer, pcConstraints);
         JSONObject json = new JSONObject();
         JSONObject payload = new JSONObject();
         try {
             payload.put("sdp", peer.pc.getLocalDescription().description);
             payload.put("type", peer.pc.getLocalDescription().type.canonicalForm());
-            payload.put("srcPhoneNumber", srcPhoneNumber);
+            payload.put("srcPhoneNumber", peer.phoneNumber);
             json.put("payload", payload);
             json.put("type","SessionDescription");
         } catch (JSONException e) {
@@ -161,18 +161,17 @@ public class WebRtcClient {
         return  json;
     }
 
-    public JSONObject createSdpAnswer(String srcPhoneNumber) {
-        Peer peer = new Peer(srcPhoneNumber);
+    public JSONObject createSdpAnswer(String srcPhoneNumber, SessionDescription remoteSdp) {
+        peer = new Peer(srcPhoneNumber);
+        peer.pc.setRemoteDescription(peer, remoteSdp);
         peer.pc.createOffer(peer, pcConstraints);
-        SessionDescription sdp = peer.pc.getLocalDescription();
-
 
         JSONObject json = new JSONObject();
         JSONObject payload = new JSONObject();
 
         try {
             payload.put("sdp", peer.pc.getLocalDescription().description);
-            payload.put("type", peer.pc.getLocalDescription().type.canonicalForm());
+            payload.put("type", "answer"); //peer.pc.getLocalDescription().type.canonicalForm());
             payload.put("srcPhoneNumber", srcPhoneNumber);
             json.put("payload", payload);
             json.put("type", "SessionDescription");
@@ -182,14 +181,12 @@ public class WebRtcClient {
         return  json;
     }
 
-    public void setRemoteSdp(String phoneNumber, SessionDescription sdp) {
-        Peer peer = new Peer(phoneNumber);
+    public void setRemoteSdp(SessionDescription sdp) {
         peer.pc.setRemoteDescription(peer, sdp);
-        peer.pc.createAnswer(peer, pcConstraints);
+//        peer.pc.createAnswer(peer, pcConstraints);
     }
 
-    public void addIceCandidate(String phoneNumber, IceCandidate iceCandidate) {
-        Peer peer = new Peer(phoneNumber);
+    public void addIceCandidate(IceCandidate iceCandidate) {
         peer.pc.addIceCandidate(iceCandidate);
     }
 
@@ -233,6 +230,7 @@ public class WebRtcClient {
                     break;
                 case STABLE:
                     Log.d("SIGNALING_STATE", "Signaling STABLE");
+                    setCamera();
                     break;
                 case CLOSED:
                     Log.d("SIGNALING_STATE", "Signaling CLOSED");
@@ -255,7 +253,6 @@ public class WebRtcClient {
 
         @Override
         public void onIceCandidate(final IceCandidate candidate) {
-
             mListener.didDiscoverIceCandidate(candidate);
         }
 
@@ -274,6 +271,9 @@ public class WebRtcClient {
 
         @Override
         public void onDataChannel(DataChannel dataChannel) {
+            rtcDataChannel = dataChannel;
+            String channelName = dataChannel.label();
+            Log.d("SIGNALING_STATE", "on data channel " +  channelName);
         }
 
         @Override
@@ -295,14 +295,11 @@ public class WebRtcClient {
         public Peer(String srcPhoneNumber) {
             this.pc = factory.createPeerConnection(iceServers, pcConstraints, this);
             this.phoneNumber = srcPhoneNumber;
-
+//
             pc.addStream(localMS);
             mListener.onStatusChanged("CONNECTING");
         }
     }
-
-
-
 
 
     private void removePeer(String id) {
@@ -320,6 +317,7 @@ public class WebRtcClient {
                 params.videoCodecHwAcceleration, mEGLcontext);
         factory = new PeerConnectionFactory();
 
+
         iceServers.add(new PeerConnection.IceServer("stun:23.21.150.121"));
         iceServers.add(new PeerConnection.IceServer("stun:stun.l.google.com:19302"));
         iceServers.add(new PeerConnection.IceServer("turn:numb.viagenie.ca","webrtc@live.com", "muazkh"));
@@ -328,7 +326,6 @@ public class WebRtcClient {
         pcConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
         pcConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"));
         pcConstraints.optional.add(new MediaConstraints.KeyValuePair("DtlsSrtpKeyAgreement", "true"));
-
 
         setCamera();
     }
@@ -365,24 +362,6 @@ public class WebRtcClient {
 
 
 
-    /**
-     * Start the client.
-     * <p>
-     * Set up the local stream and notify the signaling server.
-     * Call this method after onCallReady.
-     *
-     * @param name client name
-     */
-    public void start(String name) {
-        setCamera();
-        try {
-            JSONObject message = new JSONObject();
-            message.put("name", name);
-//            client.emit("readyToStream", message);
-        } catch (JSONException e) {
-            e.printStackTrace();
-        }
-    }
 
     public void setCamera() {
         localMS = factory.createLocalMediaStream("ARDAMS");
@@ -405,7 +384,7 @@ public class WebRtcClient {
 
     private VideoCapturer getVideoCapturer() {
         String frontCameraDeviceName = VideoCapturerAndroid.getNameOfFrontFacingDevice();
-//        String rearCameraDeviceName = VideoCapturerAndroid.getNameOfBackFacingDevice();
-        return VideoCapturerAndroid.create(frontCameraDeviceName);
+        String rearCameraDeviceName = VideoCapturerAndroid.getNameOfBackFacingDevice();
+        return VideoCapturerAndroid.create(rearCameraDeviceName);
     }
 }

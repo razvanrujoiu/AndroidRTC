@@ -93,6 +93,9 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+        phoneNumber = sharedPreferences.getString("phoneNumber", null);
+
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(
                 LayoutParams.FLAG_FULLSCREEN
@@ -130,8 +133,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
             callerId = segments.get(0);
         }
 
-        sharedPreferences = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
-        phoneNumber = sharedPreferences.getString("phoneNumber", null);
+
 
         remotePhoneNumberEditText = findViewById(R.id.remotePhoneNumberEditText);
         callBtn = findViewById(R.id.callBtn);
@@ -151,24 +153,19 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
             publishMessage(json.toString(), "/" + remotePhoneNumber);
 
-            webRtcClient.setCamera();
+//            webRtcClient.setCamera();
 
         });
 
         answerBtn.setOnClickListener(v -> {
 
             if(!remotePhoneNumber.isEmpty()) {
-                JSONObject json = webRtcClient.createSdpAnswer(phoneNumber);
+                JSONObject json = webRtcClient.createSdpAnswer(phoneNumber, webRtcClient.remoteSdp);
                 publishMessage(json.toString(), "/" + remotePhoneNumber);
-                webRtcClient.setCamera();
+//                webRtcClient.setCamera();
             }
         });
-
-
-
-
     }
-
 
     void setupMqttConnection() {
         mqttAndroidClient = new MqttAndroidClient(getApplicationContext(), mqttServerUri, phoneNumber);
@@ -225,7 +222,8 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
                         SessionDescription sessionDescription = new SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdpDescription);
 
-                        webRtcClient.setRemoteSdp(remotePhoneNumber, sessionDescription);
+                        webRtcClient.remoteSdp = sessionDescription;
+                        webRtcClient.setRemoteSdp(sessionDescription);
 
                         Log.d("MQTT", sessionDescription.toString());
 
@@ -238,12 +236,11 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
                         IceCandidate iceCandidate = new IceCandidate(sdpMid, sdpMLineIndex, sdp);
 
-                        webRtcClient.addIceCandidate(remotePhoneNumber, iceCandidate);
+                        webRtcClient.addIceCandidate(iceCandidate);
 
                         Log.d("MQTT", iceCandidate.toString());
 
                     }
-
                 }
             }
 
@@ -334,12 +331,6 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     }
 
 
-    public void startCam() {
-        // Camera settings
-        if (PermissionChecker.hasPermissions(this, RequiredPermissions)) {
-            webRtcClient.start("android_test");
-        }
-    }
 
     @Override
     public void onStatusChanged(final String newStatus) {
