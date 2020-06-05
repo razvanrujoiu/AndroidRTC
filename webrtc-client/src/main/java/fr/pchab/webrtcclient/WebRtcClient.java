@@ -42,8 +42,6 @@ public class WebRtcClient {
     private RtcListener mListener;
 //    private Socket client;
 
-    public IceCandidate iceCandidate;
-    public PublishSubject<IceCandidate> iceCandidatePublishSubject = PublishSubject.create();
     /**
      * Implement this interface to be notified of events.
      */
@@ -60,11 +58,10 @@ public class WebRtcClient {
 
         void onAddRemoteStream(MediaStream remoteStream);
 
+        void didDiscoverIceCandidate(IceCandidate iceCandidate);
+
         void onRemoveRemoteStream();
 
-//        void didDiscoverIceCandidate(IceCandidate iceCandidate) {
-//
-//        };
     }
 
 
@@ -258,8 +255,8 @@ public class WebRtcClient {
 
         @Override
         public void onIceCandidate(final IceCandidate candidate) {
-            iceCandidate = candidate;
-            iceCandidatePublishSubject.onNext(candidate);
+
+            mListener.didDiscoverIceCandidate(candidate);
         }
 
         @Override
@@ -407,8 +404,8 @@ public class WebRtcClient {
     }
 
     private VideoCapturer getVideoCapturer() {
-//        String frontCameraDeviceName = VideoCapturerAndroid.getNameOfFrontFacingDevice();
-        String rearCameraDeviceName = VideoCapturerAndroid.getNameOfBackFacingDevice();
-        return VideoCapturerAndroid.create(rearCameraDeviceName);
+        String frontCameraDeviceName = VideoCapturerAndroid.getNameOfFrontFacingDevice();
+//        String rearCameraDeviceName = VideoCapturerAndroid.getNameOfBackFacingDevice();
+        return VideoCapturerAndroid.create(frontCameraDeviceName);
     }
 }

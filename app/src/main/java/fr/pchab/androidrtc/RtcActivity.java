@@ -88,7 +88,6 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     private Button callBtn;
     private Button answerBtn;
 
-    Observable<IceCandidate> iceCandidateObservable;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -306,30 +305,6 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
                 true, false, displaySize.x, displaySize.y, 30, 1, VIDEO_CODEC_VP9, true, 1, AUDIO_CODEC_OPUS, true);
 
         webRtcClient = new WebRtcClient(this, params, VideoRendererGui.getEGLContext());
-
-
-        iceCandidateObservable = webRtcClient.iceCandidatePublishSubject.doOnNext(iceCandidate -> {
-            if (iceCandidate != null) {
-                JSONObject json = new JSONObject();
-                JSONObject payload = new JSONObject();
-
-                try {
-                    payload.put("sdp", iceCandidate.sdp);
-                    payload.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
-                    payload.put("sdpMid", iceCandidate.sdpMid);
-                    payload.put("srcPhoneNumber", phoneNumber);
-                    json.put("payload", payload);
-                    json.put("type", "IceCandidate");
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-
-                publishMessage(json.toString(), "/" + remotePhoneNumber);
-            }
-        });
-        iceCandidateObservable.subscribe();
-
-
     }
 
     @Override
@@ -390,6 +365,25 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
                 LOCAL_X_CONNECTED, LOCAL_Y_CONNECTED,
                 LOCAL_WIDTH_CONNECTED, LOCAL_HEIGHT_CONNECTED,
                 scalingType, false);
+    }
+
+    @Override
+    public void didDiscoverIceCandidate(IceCandidate iceCandidate) {
+        JSONObject json = new JSONObject();
+        JSONObject payload = new JSONObject();
+
+        try {
+            payload.put("sdp", iceCandidate.sdp);
+            payload.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
+            payload.put("sdpMid", iceCandidate.sdpMid);
+            payload.put("srcPhoneNumber", phoneNumber);
+            json.put("payload", payload);
+            json.put("type", "IceCandidate");
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+
+        publishMessage(json.toString(), "/" + remotePhoneNumber);
     }
 
     @Override
