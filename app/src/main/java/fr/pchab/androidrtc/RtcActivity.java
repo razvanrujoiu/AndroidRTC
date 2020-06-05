@@ -307,6 +307,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
         webRtcClient = new WebRtcClient(this, params, VideoRendererGui.getEGLContext());
 
+
         iceCandidateObservable = webRtcClient.iceCandidatePublishSubject.doOnNext(iceCandidate -> {
             if (iceCandidate != null) {
                 JSONObject json = new JSONObject();
@@ -355,31 +356,6 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
             webRtcClient.onDestroy();
         }
         super.onDestroy();
-    }
-
-//    @Override
-//    public void onCallReady(String callId) {
-//
-////        if (callerId != null) {
-////            try {
-////                answer(callerId);
-////            } catch (JSONException e) {
-////                e.printStackTrace();
-////            }
-////        } else {
-////            call(callId);
-////        }
-//    }
-
-//    public void answer(String callerId) throws JSONException {
-//        webRtcClient.sendMessage(callerId, "init", null);
-//        startCam();
-//    }
-
-    public void call(String callId) {
-        Intent msg = new Intent(Intent.ACTION_SEND);
-        msg.putExtra(Intent.EXTRA_TEXT, mSocketAddress + callId);
-        msg.setType("text/plain");
     }
 
 

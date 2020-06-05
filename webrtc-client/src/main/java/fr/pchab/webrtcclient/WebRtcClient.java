@@ -196,54 +196,6 @@ public class WebRtcClient {
         peer.pc.addIceCandidate(iceCandidate);
     }
 
-//    private class MessageHandler {
-//        private HashMap<String, Command> commandMap;
-
-//        private MessageHandler() {
-//            this.commandMap = new HashMap<>();
-//            commandMap.put("init", new CreateOfferCommand());
-//            commandMap.put("offer", new CreateAnswerCommand());
-//            commandMap.put("answer", new SetRemoteSDPCommand());
-//            commandMap.put("candidate", new AddIceCandidateCommand());
-//        }
-
-//        private Emitter.Listener onMessage = new Emitter.Listener() {
-//            @Override
-//            public void call(Object... args) {
-//                JSONObject data = (JSONObject) args[0];
-//                try {
-//                    String from = data.getString("from");
-//                    String type = data.getString("type");
-//                    JSONObject payload = null;
-//                    if (!type.equals("init")) {
-//                        payload = data.getJSONObject("payload");
-//                    }
-//                    // if peer is unknown, try to add him
-//                    if (!peers.containsKey(from)) {
-//                        // if MAX_PEER is reach, ignore the call
-//                        int endPoint = findEndPoint();
-//                        if (endPoint != MAX_PEER) {
-//                            Peer peer = addPeer(from, endPoint);
-//                            peer.pc.addStream(localMS);
-//                            commandMap.get(type).execute(from, payload);
-//                        }
-//                    } else {
-//                        commandMap.get(type).execute(from, payload);
-//                    }
-//                } catch (JSONException e) {
-//                    e.printStackTrace();
-//                }
-//            }
-//        };
-
-//        private Emitter.Listener onId = new Emitter.Listener() {
-//            @Override
-//            public void call(Object... args) {
-//                String id = (String) args[0];
-//                mListener.onCallReady(id);
-//            }
-//        };
-//    }
 
     private class Peer implements SdpObserver, PeerConnection.Observer {
         private PeerConnection pc;
@@ -269,6 +221,26 @@ public class WebRtcClient {
 
         @Override
         public void onSignalingChange(PeerConnection.SignalingState signalingState) {
+            switch (signalingState) {
+                case HAVE_LOCAL_OFFER:
+                    Log.d("SIGNALING_STATE", "Have local OFFER");
+                    break;
+                case HAVE_LOCAL_PRANSWER:
+                    Log.d("SIGNALING_STATE", "Have local PRANSWER");
+                    break;
+                case HAVE_REMOTE_OFFER:
+                    Log.d("SIGNALING_STATE", "Have remote OFFER");
+                    break;
+                case HAVE_REMOTE_PRANSWER:
+                    Log.d("SIGNALING_STATE", "Have remote PRANSWER");
+                    break;
+                case STABLE:
+                    Log.d("SIGNALING_STATE", "Signaling STABLE");
+                    break;
+                case CLOSED:
+                    Log.d("SIGNALING_STATE", "Signaling CLOSED");
+                    break;
+            }
         }
 
         @Override
@@ -276,8 +248,6 @@ public class WebRtcClient {
             if (iceConnectionState == PeerConnection.IceConnectionState.DISCONNECTED) {
 //                removePeer(phoneNumber);
                 mListener.onStatusChanged("DISCONNECTED");
-            } else if (iceConnectionState == PeerConnection.IceConnectionState.CONNECTED) {
-                setCamera();
             }
         }
 
@@ -329,8 +299,6 @@ public class WebRtcClient {
             this.pc = factory.createPeerConnection(iceServers, pcConstraints, this);
             this.phoneNumber = srcPhoneNumber;
 
-            setCamera();
-
             pc.addStream(localMS);
             mListener.onStatusChanged("CONNECTING");
         }
@@ -363,6 +331,9 @@ public class WebRtcClient {
         pcConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
         pcConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"));
         pcConstraints.optional.add(new MediaConstraints.KeyValuePair("DtlsSrtpKeyAgreement", "true"));
+
+
+        setCamera();
     }
 
 
@@ -392,14 +363,10 @@ public class WebRtcClient {
             videoSource.dispose();
         }
         factory.dispose();
-//        client.disconnect();
-//        client.close();
+
     }
 
-    private int findEndPoint() {
-        for (int i = 0; i < MAX_PEER; i++) if (!endPoints[i]) return i;
-        return MAX_PEER;
-    }
+
 
     /**
      * Start the client.
