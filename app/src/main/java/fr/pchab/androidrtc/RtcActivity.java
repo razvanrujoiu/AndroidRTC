@@ -35,6 +35,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.webrtc.IceCandidate;
 import org.webrtc.MediaStream;
+import org.webrtc.PeerConnection;
 import org.webrtc.SessionDescription;
 import org.webrtc.VideoRenderer;
 import org.webrtc.VideoRendererGui;
@@ -111,12 +112,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         glSurfaceView = findViewById(R.id.glview_call);
         glSurfaceView.setPreserveEGLContextOnPause(true);
         glSurfaceView.setKeepScreenOn(true);
-        VideoRendererGui.setView(glSurfaceView, new Runnable() {
-            @Override
-            public void run() {
-                init();
-            }
-        });
+        VideoRendererGui.setView(glSurfaceView, () -> init());
 
         // local and remote render
         remoteRender = VideoRendererGui.create(
@@ -161,7 +157,7 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
         answerBtn.setOnClickListener(v -> {
 
             if(!remotePhoneNumber.isEmpty()) {
-                JSONObject json = webRtcClient.createSdpAnswer(phoneNumber, webRtcClient.remoteSdp);
+                JSONObject json = webRtcClient.createSdpAnswer(phoneNumber);
                 publishMessage(json.toString(), "/" + remotePhoneNumber);
 //                webRtcClient.setCamera();
             }
@@ -208,10 +204,15 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
             public void messageArrived(String topic, MqttMessage message) throws Exception {
                 if(topic.equals("/" + phoneNumber)) {
                     byte[] mqttPayload = message.getPayload();
+                    String jsonString = null;
 
-                    byte[] decryptedPayload = CryptoUtil.decryptAes128(mqttPayload, "/" + phoneNumber);
+                    if (Constants.useEncryption) {
+                        byte[] decryptedPayload = CryptoUtil.decryptAes128(mqttPayload, "/" + phoneNumber);
+                        jsonString = new String(decryptedPayload, "UTF-8");
+                    } else {
+                        jsonString = new String(mqttPayload, "UTF-8");
+                    }
 
-                    String jsonString = new String(decryptedPayload, "UTF-8");
                     Log.d("MQTT", jsonString);
 
                     JSONObject jsonObject = new JSONObject(jsonString);
@@ -226,8 +227,14 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
 
                         SessionDescription sessionDescription = new SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdpDescription);
 
-                        webRtcClient.remoteSdp = sessionDescription;
-                        webRtcClient.setRemoteSdp(sessionDescription);
+                        if (type.equals("offer")) {
+                            webRtcClient.remoteSdp = sessionDescription;
+                            webRtcClient.setRemoteSdp(phoneNumber ,sessionDescription);
+
+                        } else if (type.equals("answer")) {
+                            webRtcClient.remoteSdp = sessionDescription;
+                            webRtcClient.setRemoteSdp(phoneNumber ,sessionDescription);
+                        }
 
                         Log.d("MQTT", sessionDescription.toString());
 
@@ -276,9 +283,14 @@ public class RtcActivity extends Activity implements WebRtcClient.RtcListener {
     }
 
     public void publishMessage(String message, String topic) {
+        MqttMessage mqttMessage = null;
         try {
-            byte[] encryptedMessage = CryptoUtil.encryptAes128(message.getBytes("UTF-8"), topic);
-            MqttMessage mqttMessage = new MqttMessage(encryptedMessage);
+            if(Constants.useEncryption) {
+                byte[] encryptedMessage = CryptoUtil.encryptAes128(message.getBytes("UTF-8"), topic);
+                mqttMessage = new MqttMessage(encryptedMessage);
+            } else {
+                mqttMessage = new MqttMessage(message.getBytes("UTF-8"));
+            }
             mqttAndroidClient.publish(topic, mqttMessage);
         } catch (MqttException e) {
             e.printStackTrace();

@@ -67,7 +67,7 @@ public class CryptoUtil {
         try {
             Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
             cipher.init(Cipher.DECRYPT_MODE, secretKeySpec, ivParameterSpec);
-            decryptedContent = cipher.doFinal(encryptedInputContent);
+            decryptedContent = cipher.doFinal(encryptedInputContent);   
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         } catch (NoSuchPaddingException e) {

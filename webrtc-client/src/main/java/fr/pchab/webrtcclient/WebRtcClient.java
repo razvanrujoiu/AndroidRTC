@@ -161,17 +161,14 @@ public class WebRtcClient {
         return  json;
     }
 
-    public JSONObject createSdpAnswer(String srcPhoneNumber, SessionDescription remoteSdp) {
-        peer = new Peer(srcPhoneNumber);
-        peer.pc.setRemoteDescription(peer, remoteSdp);
-        peer.pc.createOffer(peer, pcConstraints);
+    public JSONObject createSdpAnswer(String srcPhoneNumber) {
 
         JSONObject json = new JSONObject();
         JSONObject payload = new JSONObject();
 
         try {
             payload.put("sdp", peer.pc.getLocalDescription().description);
-            payload.put("type", "answer"); //peer.pc.getLocalDescription().type.canonicalForm());
+            payload.put("type", "answer");
             payload.put("srcPhoneNumber", srcPhoneNumber);
             json.put("payload", payload);
             json.put("type", "SessionDescription");
@@ -181,9 +178,11 @@ public class WebRtcClient {
         return  json;
     }
 
-    public void setRemoteSdp(SessionDescription sdp) {
+    public void setRemoteSdp(String srcPhoneNumber, SessionDescription sdp) {
+        if (this.peer == null) {
+            peer = new Peer(srcPhoneNumber);
+        }
         peer.pc.setRemoteDescription(peer, sdp);
-//        peer.pc.createAnswer(peer, pcConstraints);
     }
 
     public void addIceCandidate(IceCandidate iceCandidate) {
@@ -191,8 +190,8 @@ public class WebRtcClient {
     }
 
 
-    private class Peer implements SdpObserver, PeerConnection.Observer {
-        private PeerConnection pc;
+    public class Peer implements SdpObserver, PeerConnection.Observer {
+        public PeerConnection pc;
         private String phoneNumber;
         private int endPoint;
 
@@ -203,6 +202,7 @@ public class WebRtcClient {
 
         @Override
         public void onSetSuccess() {
+           pc.createAnswer(peer, pcConstraints);
         }
 
         @Override
@@ -359,9 +359,6 @@ public class WebRtcClient {
         factory.dispose();
 
     }
-
-
-
 
     public void setCamera() {
         localMS = factory.createLocalMediaStream("ARDAMS");

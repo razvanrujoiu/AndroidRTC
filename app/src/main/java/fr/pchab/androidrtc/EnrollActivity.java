@@ -17,8 +17,6 @@ public class EnrollActivity extends AppCompatActivity {
     SharedPreferences sharedPreferences;
     SharedPreferences.Editor editor;
 
-
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -34,18 +32,15 @@ public class EnrollActivity extends AppCompatActivity {
             navigateToRtcActivity();
         }
 
-        btnEnroll.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (phoneNumberEditText.getText().toString().equals("") || phoneNumberEditText.getText().toString().isEmpty()) {
-                    Toast.makeText(getApplicationContext(), "Please input phone number", Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                editor.putString("phoneNumber", phoneNumberEditText.getText().toString());
-                editor.commit();
-                navigateToRtcActivity();
+        btnEnroll.setOnClickListener(v -> {
+            if (phoneNumberEditText.getText().toString().equals("") || phoneNumberEditText.getText().toString().isEmpty()) {
+                Toast.makeText(getApplicationContext(), "Please input phone number", Toast.LENGTH_LONG).show();
+                return;
             }
+
+            editor.putString("phoneNumber", phoneNumberEditText.getText().toString());
+            editor.commit();
+            navigateToRtcActivity();
         });
     }
 
